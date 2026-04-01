@@ -40,6 +40,15 @@ export default function App() {
   const [cashAmount, setCashAmount] = useState('');
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
+  // Gabungkan perangkat yang sudah di-pair dengan perangkat yang sedang terpilih
+  const allDevices = useMemo(() => {
+    const list = [...pairedDevices];
+    if (selectedDevice && !list.find(d => d.id === selectedDevice.id)) {
+      list.unshift(selectedDevice);
+    }
+    return list;
+  }, [pairedDevices, selectedDevice]);
+
   // Load data from localStorage
   useEffect(() => {
     const savedProducts = localStorage.getItem('tp_products');
@@ -440,8 +449,8 @@ export default function App() {
                   <p className="text-sm text-gray-500">Pilih printer yang sudah terhubung atau tambahkan baru.</p>
                   
                   <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
-                    {pairedDevices.length > 0 ? (
-                      pairedDevices.map(device => (
+                    {allDevices.length > 0 ? (
+                      allDevices.map(device => (
                         <button
                           key={device.id}
                           onClick={() => {
