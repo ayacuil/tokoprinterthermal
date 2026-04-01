@@ -1,0 +1,5 @@
+{
+  "name": "Toko Pintar Thermal",
+  "description": "A mobile-optimized POS application with Bluetooth thermal printer support.",
+  "requestFramePermissions": ["bluetooth"]
+}
