@@ -17,11 +17,13 @@ import {
   ArrowLeft,
   CheckCircle2,
   AlertCircle,
-  X
+  X,
+  Settings,
+  Bluetooth
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, CartItem, Transaction } from './types';
-import { printReceipt } from './lib/bluetooth';
+import { printReceipt, getPairedDevices, requestNewDevice } from './lib/bluetooth';
 
 const STORE_NAME = "TOKO PINTAR";
 
@@ -32,6 +34,9 @@ export default function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
+  const [pairedDevices, setPairedDevices] = useState<BluetoothDevice[]>([]);
+  const [selectedDevice, setSelectedDevice] = useState<BluetoothDevice | null>(null);
   const [cashAmount, setCashAmount] = useState('');
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
@@ -53,7 +58,36 @@ export default function App() {
       setProducts(initialProducts);
       localStorage.setItem('tp_products', JSON.stringify(initialProducts));
     }
+
+    // Load paired devices
+    refreshPairedDevices();
   }, []);
+
+  const refreshPairedDevices = async () => {
+    try {
+      const devices = await getPairedDevices();
+      setPairedDevices(devices);
+      // Auto select if only one
+      if (devices.length === 1 && !selectedDevice) {
+        setSelectedDevice(devices[0]);
+      }
+    } catch (e) {
+      console.error('Failed to get paired devices', e);
+    }
+  };
+
+  const handlePairNew = async () => {
+    try {
+      const device = await requestNewDevice();
+      setSelectedDevice(device);
+      refreshPairedDevices();
+      showStatus('success', `Berhasil menghubungkan ${device.name}`);
+    } catch (error: any) {
+      if (!error.message.includes('cancelled')) {
+        showStatus('error', error.message);
+      }
+    }
+  };
 
   // Save data to localStorage
   useEffect(() => {
@@ -119,10 +153,6 @@ export default function App() {
     setIsPaymentModalOpen(false);
     setCashAmount('');
     showStatus('success', 'Transaksi Berhasil!');
-
-    // Auto print prompt or direct print? Let's offer a button in the success message or just try to print.
-    // Given it's a POS app, we might want to try printing immediately or show a "Print" button.
-    // For now, let's just show success and let them print from history if needed, or add a print button to the success state.
   };
 
   const showStatus = (type: 'success' | 'error', text: string) => {
@@ -131,12 +161,17 @@ export default function App() {
   };
 
   const handlePrint = async (transaction: Transaction) => {
+    // Jika belum ada device terpilih, buka modal pemilihan
+    if (!selectedDevice && pairedDevices.length > 0) {
+      setIsPrinterModalOpen(true);
+      return;
+    }
+
     try {
       showStatus('success', 'Menghubungkan ke printer...');
-      await printReceipt(transaction, STORE_NAME);
+      await printReceipt(transaction, selectedDevice || undefined, STORE_NAME);
       showStatus('success', 'Struk dicetak!');
     } catch (error: any) {
-      // Jika dibatalkan oleh user, jangan tampilkan pesan error merah (cukup hilangkan loading)
       if (error.message === 'Pencarian printer dibatalkan.') {
         setStatusMessage(null);
         return;
@@ -181,6 +216,16 @@ export default function App() {
           <div className="flex justify-between items-center">
             <h1 className="text-xl font-bold tracking-tight">{STORE_NAME}</h1>
             <div className="flex gap-2">
+              <button 
+                onClick={() => {
+                  refreshPairedDevices();
+                  setIsPrinterModalOpen(true);
+                }}
+                className={`p-2 rounded-full transition-colors ${selectedDevice ? 'bg-indigo-500' : 'hover:bg-indigo-700'}`}
+                title="Pengaturan Printer"
+              >
+                <Bluetooth size={20} className={selectedDevice ? 'text-white' : 'text-indigo-200'} />
+              </button>
               {activeTab === 'pos' && cart.length > 0 && (
                 <button 
                   onClick={() => setCart([])}
@@ -370,6 +415,70 @@ export default function App() {
           <NavButton active={activeTab === 'products'} onClick={() => setActiveTab('products')} icon={<Package size={20} />} label="Produk" />
           <NavButton active={activeTab === 'history'} onClick={() => setActiveTab('history')} icon={<History size={20} />} label="Riwayat" />
         </nav>
+
+        {/* Printer Selection Modal */}
+        <AnimatePresence>
+          {isPrinterModalOpen && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-white w-full max-w-[380px] rounded-3xl p-6 space-y-6 shadow-2xl"
+              >
+                <div className="flex justify-between items-center">
+                  <h2 className="text-xl font-bold text-gray-800">Pilih Printer</h2>
+                  <button onClick={() => setIsPrinterModalOpen(false)} className="p-2 bg-gray-100 rounded-full"><X size={20} /></button>
+                </div>
+
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-500">Pilih printer yang sudah terhubung atau tambahkan baru.</p>
+                  
+                  <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+                    {pairedDevices.length > 0 ? (
+                      pairedDevices.map(device => (
+                        <button
+                          key={device.id}
+                          onClick={() => {
+                            setSelectedDevice(device);
+                            setIsPrinterModalOpen(false);
+                          }}
+                          className={`w-full flex items-center justify-between p-4 rounded-2xl border-2 transition-all ${
+                            selectedDevice?.id === device.id 
+                            ? 'border-indigo-600 bg-indigo-50' 
+                            : 'border-gray-100 hover:border-indigo-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Bluetooth size={20} className={selectedDevice?.id === device.id ? 'text-indigo-600' : 'text-gray-400'} />
+                            <span className="font-bold text-gray-700">{device.name || 'Printer Tanpa Nama'}</span>
+                          </div>
+                          {selectedDevice?.id === device.id && <CheckCircle2 size={20} className="text-indigo-600" />}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="text-center py-6 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
+                        <p className="text-sm text-gray-400">Belum ada printer yang diizinkan.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <button 
+                    onClick={handlePairNew}
+                    className="w-full flex items-center justify-center gap-2 py-4 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
+                  >
+                    <Plus size={20} /> Pair Printer Baru
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Payment Modal */}
         <AnimatePresence>

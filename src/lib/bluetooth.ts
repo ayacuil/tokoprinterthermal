@@ -69,51 +69,48 @@ const PRINT_CHARACTERISTIC_UUID = '00002af1-0000-1000-8000-00805f9b34fb';
 
 let cachedDevice: BluetoothDevice | null = null;
 
-export async function printReceipt(transaction: any, storeName: string = 'TOKO PINTAR') {
+export async function getPairedDevices() {
+  if (navigator.bluetooth && navigator.bluetooth.getDevices) {
+    return await navigator.bluetooth.getDevices();
+  }
+  return [];
+}
+
+export async function requestNewDevice() {
+  if (!navigator.bluetooth) {
+    throw new Error('Web Bluetooth tidak didukung di browser ini.');
+  }
+
+  const device = await navigator.bluetooth.requestDevice({
+    acceptAllDevices: true,
+    optionalServices: [PRINT_SERVICE_UUID]
+  });
+  
+  return device;
+}
+
+export async function printReceipt(transaction: any, deviceToUse?: BluetoothDevice, storeName: string = 'TOKO PINTAR') {
   if (!navigator.bluetooth) {
     throw new Error('Web Bluetooth tidak didukung di browser ini.');
   }
 
   try {
-    let device: BluetoothDevice | undefined;
+    let device: BluetoothDevice | undefined = deviceToUse || cachedDevice || undefined;
 
-    // 1. Cek apakah ada device yang sudah terhubung/tersimpan di memori aplikasi (Sesi ini)
-    if (cachedDevice) {
-      device = cachedDevice;
-      console.log('Menggunakan printer dari cache sesi:', device.name);
-    }
-
-    // 2. Jika tidak ada di cache, cari dari daftar perangkat yang sudah pernah diberi izin (Paired di browser)
+    // 1. Jika tidak ada device yang diberikan/dicache, coba cari yang sudah diizinkan
     if (!device && navigator.bluetooth.getDevices) {
       const pairedDevices = await navigator.bluetooth.getDevices();
-      console.log('Mengecek perangkat yang sudah paired di browser:', pairedDevices.length);
-      
       device = pairedDevices.find(d => 
         /printer|mtp|pos|thermal|58mm/i.test(d.name || '')
       );
-
-      if (device) {
-        console.log('Menggunakan printer yang ditemukan dari izin browser:', device.name);
-      }
     }
 
-    // 3. Hanya jika benar-benar tidak ada, minta izin baru (Pop-up muncul)
+    // 2. Jika tetap tidak ada, minta izin baru
     if (!device) {
-      console.log('Tidak ada printer tersimpan, membuka jendela pemilihan...');
-      device = await navigator.bluetooth.requestDevice({
-        // Gunakan filter agar hanya printer yang muncul (menyembunyikan jam/tablet)
-        filters: [
-          { services: [PRINT_SERVICE_UUID] },
-          { namePrefix: 'Printer' },
-          { namePrefix: 'MTP' },
-          { namePrefix: 'POS' },
-          { namePrefix: 'BT' }
-        ],
-        optionalServices: [PRINT_SERVICE_UUID]
-      });
+      device = await requestNewDevice();
     }
 
-    // Simpan ke cache agar tidak perlu pair lagi selama aplikasi tidak di-refresh
+    // Simpan ke cache
     cachedDevice = device;
 
     const server = await device.gatt?.connect();
